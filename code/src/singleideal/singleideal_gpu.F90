@@ -524,7 +524,7 @@ contains
       calorically_perfect => self%equation_base%calorically_perfect, &
       ep_ord_change_x_gpu => self%ep_ord_change_x_gpu, nkeep => self%equation_base%nkeep, &
       flux_splitting => self%equation_base%flux_splitting, &
-      rgas0 => self%equation_base%rgas0)
+      rgas0 => self%equation_base%rgas0, energy_form => self%equation_base%energy_form)
 !
       call euler_x_transp_cuf(nx, ny, nz, ng, istart_trans, iend_trans, nv_aux, w_aux_gpu, w_aux_trans_gpu, stream1)
 !
@@ -548,7 +548,7 @@ contains
           force_zero_flux_min, force_zero_flux_max, weno_scheme, weno_version, &
           sensor_threshold, weno_size, gplus_x_gpu, gminus_x_gpu, cp_coeff_gpu, indx_cp_l, indx_cp_r, &
           ep_ord_change_x_gpu, calorically_perfect, tol_iter_nr,self%equation_base%rho0,self%equation_base%u0, &
-          self%equation_base%t0)
+          self%equation_base%t0, energy_form)
       endif
 !
       call euler_x_update_cuf(nx, ny, nz, ng, nv, istart, iend, fhat_trans_gpu, fl_trans_gpu, fl_gpu, dcsidx_gpu, stream1)
@@ -577,7 +577,7 @@ contains
       cp_coeff_gpu => self%cp_coeff_gpu, &
       ep_ord_change_gpu => self%ep_ord_change_gpu, nkeep => self%equation_base%nkeep, &
       flux_splitting => self%equation_base%flux_splitting, &
-      rgas0 => self%equation_base%rgas0)
+      rgas0 => self%equation_base%rgas0, energy_form => self%equation_base%energy_form)
       weno_size = 2*weno_scheme
       lmax  = ep_order/2 ! max stencil width
       force_zero_flux_min = force_zero_flux(3)
@@ -598,7 +598,7 @@ contains
           force_zero_flux_min, force_zero_flux_max, weno_scheme, weno_version, &
           sensor_threshold, weno_size, w_gpu, gplus_y_gpu, gminus_y_gpu, cp_coeff_gpu, indx_cp_l, indx_cp_r, &
           ep_ord_change_gpu, calorically_perfect, tol_iter_nr,self%equation_base%rho0,self%equation_base%u0, &
-          self%equation_base%t0)
+          self%equation_base%t0, energy_form)
       endif
     endassociate
   endsubroutine euler_y
@@ -627,7 +627,7 @@ contains
       flux_splitting => self%equation_base%flux_splitting, &
       rgas0 => self%equation_base%rgas0, &
       inflow_random_plane => self%equation_base%inflow_random_plane, &
-      inflow_random_plane_gpu => self%inflow_random_plane_gpu)
+      inflow_random_plane_gpu => self%inflow_random_plane_gpu, energy_form => self%equation_base%energy_form)
       weno_size = 2*weno_scheme
       lmax = ep_order/2 ! max stencil width
       force_zero_flux_min = force_zero_flux(5)
@@ -647,7 +647,7 @@ contains
           force_zero_flux_min, force_zero_flux_max, weno_scheme, weno_version, &
           sensor_threshold, weno_size, w_gpu, gplus_z_gpu, gminus_z_gpu, cp_coeff_gpu, indx_cp_l, indx_cp_r, &
           ep_ord_change_gpu, calorically_perfect, tol_iter_nr,self%equation_base%rho0,self%equation_base%u0, &
-          self%equation_base%t0)
+          self%equation_base%t0, energy_form)
       endif
       if (self%equation_base%recyc) call get_crandom_f(inflow_random_plane(2:self%equation_base%jbl_inflow,1:nz,1:3))
 !

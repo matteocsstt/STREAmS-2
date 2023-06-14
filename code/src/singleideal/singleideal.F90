@@ -61,6 +61,7 @@ module streams_equation_singleideal_object
 !
     integer(ikind)            :: visc_order, conservative_viscous
     integer(ikind)            :: ep_order, nkeep
+    integer(ikind)            :: energy_form
     integer(ikind)            :: weno_scheme, weno_version, flux_splitting
     real(rkind)               :: sensor_threshold
     real(rkind)               :: xshock_imp, shock_angle, tanhfacs
@@ -347,6 +348,13 @@ contains
         self%nkeep = 0
       endif
     endif
+!    
+    if (self%cfg%has_key("numerics","energy_form")) then
+      call self%cfg%get("numerics","energy_form",self%energy_form)
+    else
+      self%energy_form = 1
+    endif
+!    
     call self%cfg%get("numerics","weno_scheme",self%weno_scheme)
     call self%cfg%get("numerics","weno_version",self%weno_version)
     if (self%cfg%has_key("numerics","flux_splitting")) then

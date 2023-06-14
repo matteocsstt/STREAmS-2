@@ -65,13 +65,14 @@ contains
     eul_imin, eul_imax, lmax_base, nkeep, rgas0, coeff_deriv1_gpu, dcsidx_gpu, w_aux_trans_gpu, fhat_trans_gpu, &
     force_zero_flux_min, force_zero_flux_max, &
     weno_scheme, weno_version, sensor_threshold, weno_size, gplus_x_gpu, gminus_x_gpu, cp_coeff_gpu, &
-    indx_cp_l, indx_cp_r, ep_ord_change_x_gpu, calorically_perfect, tol_iter_nr,rho0,u0,t0)
+    indx_cp_l, indx_cp_r, ep_ord_change_x_gpu, calorically_perfect, tol_iter_nr,rho0,u0,t0,energy_form)
 !
     implicit none
 !   Passed arguments
     integer, value :: nv, nx, ny, nz, ng, nv_aux
     integer, value :: eul_imin, eul_imax, lmax_base, nkeep, indx_cp_l, indx_cp_r, calorically_perfect
     integer, value :: weno_scheme, weno_size, weno_version
+    integer, value :: energy_form
     integer, dimension(0:ny,0:nx,0:nz) :: ep_ord_change_x_gpu
     real(rkind), dimension(1-ng:ny+ng,1-ng:nx+ng,1-ng:nz+ng,1:8) :: w_aux_trans_gpu
     real(rkind), dimension(1-ng:ny+ng,1-ng:nx+ng,1-ng:nz+ng,1:nv) :: fhat_trans_gpu
@@ -86,7 +87,7 @@ contains
     integer :: i, j, k, m, l
     real(rkind) :: fh1, fh2, fh3, fh4, fh5
     real(rkind) :: rhom, uui, vvi, wwi, ppi, enti, rhoi, tti
-    real(rkind) :: uuip, vvip, wwip, ppip, entip, rhoip, ttip
+    real(rkind) :: uuip, vvip, wwip, ppip, entip, rhoip, ttip, qqi, qqip
     real(rkind) :: ft1, ft2, ft3, ft4, ft5, ft6
     real(rkind) :: uvs1, uvs2, uvs3, uvs4, uvs6, uv_part
     real(rkind) :: uvs5
@@ -124,7 +125,7 @@ contains
         ft5  = 0._rkind
         ft6  = 0._rkind
         lmax = max(lmax_base+ep_ord_change_x_gpu(j,i,k),1)
-        if (nkeep>=0) then
+
           do l=1,lmax
             uvs1 = 0._rkind
             uvs2 = 0._rkind
@@ -143,7 +144,8 @@ contains
               enti  = w_aux_trans_gpu(j,i-m,k,5)
               tti   = w_aux_trans_gpu(j,i-m,k,6)
               ppi   = tti*rhoi*rgas0
-              eei   = enti-ppi/rhoi-0.5_rkind*(uui*uui+vvi*vvi+wwi*wwi)
+              qqi   = 0.5_rkind*(uui*uui+vvi*vvi+wwi*wwi)
+              eei   = enti-ppi/rhoi-qqi
 !
               rhoip = w_aux_trans_gpu(j,i-m+l,k,1)
               uuip  = w_aux_trans_gpu(j,i-m+l,k,2)
@@ -152,86 +154,94 @@ contains
               entip = w_aux_trans_gpu(j,i-m+l,k,5)
               ttip  = w_aux_trans_gpu(j,i-m+l,k,6)
               ppip  = ttip*rhoip*rgas0
-              eeip  = entip-ppip/rhoip-0.5_rkind*(uuip*uuip+vvip*vvip+wwip*wwip)
+              qqip  = 0.5_rkind*(uuip*uuip+vvip*vvip+wwip*wwip)
+              eeip  = entip-ppip/rhoip-qqip
 !
               rhom  = rhoi+rhoip
               eem   = eei + eeip
 !
-              drho   = 2._rkind*(rhoip-rhoi)/rhom
-              dee    = 2._rkind*(eeip - eei)/eem
-              sumnumrho = 1._rkind
-              sumdenrho = 1._rkind
-              sumnumee  = 1._rkind
-              sumdenee  = 1._rkind
-              do n = 1, nkeep
-                n2 = 2*n
-                sumdenrho = sumdenrho + (0.5_rkind*drho)**n2 / (1._rkind+n2)
-                sumdenee  = sumdenee  + (0.5_rkind*dee )**n2
-                sumnumee  = sumnumee  + (0.5_rkind*dee )**n2 / (1._rkind+n2)
-              enddo
-              drhof = sumnumrho/sumdenrho
-              deef  = sumnumee /sumdenee
+              select case(energy_form)
+              case(0) ! Etot KGP
 !
-              uv_part = (uui+uuip) * rhom * drhof
-              uvs1 = uvs1 + uv_part * (2._rkind)
-              uvs2 = uvs2 + uv_part * (uui+uuip)
-              uvs3 = uvs3 + uv_part * (vvi+vvip)
-              uvs4 = uvs4 + uv_part * (wwi+wwip)
-              uvs5_i = uvs5_i + uv_part * eem * deef
-              uvs5_k = uvs5_k + uv_part * (uui*uuip+vvi*vvip+wwi*wwip)
-              uvs5_p = uvs5_p + 4._rkind*(uui*ppip+uuip*ppi)
-              uvs6 = uvs6 + (2._rkind)*(ppi+ppip)
-            enddo
-            ft1  = ft1  + coeff_deriv1_gpu(l,lmax)*uvs1
-            ft2  = ft2  + coeff_deriv1_gpu(l,lmax)*uvs2
-            ft3  = ft3  + coeff_deriv1_gpu(l,lmax)*uvs3
-            ft4  = ft4  + coeff_deriv1_gpu(l,lmax)*uvs4
-            ft5  = ft5  + coeff_deriv1_gpu(l,lmax)*(uvs5_i+uvs5_k+uvs5_p)
-            ft6  = ft6  + coeff_deriv1_gpu(l,lmax)*uvs6
-          enddo
-        else
-          do l=1,lmax
-            uvs1 = 0._rkind
-            uvs2 = 0._rkind
-            uvs3 = 0._rkind
-            uvs4 = 0._rkind
-            uvs5 = 0._rkind
-            uvs6 = 0._rkind
-            do m=0,l-1
+                uv_part = (uui+uuip) * rhom
+                uvs1 = uvs1 + uv_part * (2._rkind)
+                uvs2 = uvs2 + uv_part * (uui+uuip)
+                uvs3 = uvs3 + uv_part * (vvi+vvip)
+                uvs4 = uvs4 + uv_part * (wwi+wwip)
+                uvs5_i = uvs5_i + uv_part * (entip-ppip/rhoip+enti-ppi/rhoi) 
+                uvs5_p = uvs5_p + 4._rkind*(uui*ppi+uuip*ppip)
+                uvs6 = uvs6 + (2._rkind)*(ppi+ppip)
 !
-              rhoi  = w_aux_trans_gpu(j,i-m,k,1)
-              uui   = w_aux_trans_gpu(j,i-m,k,2)
-              vvi   = w_aux_trans_gpu(j,i-m,k,3)
-              wwi   = w_aux_trans_gpu(j,i-m,k,4)
-              enti  = w_aux_trans_gpu(j,i-m,k,5)
-              tti   = w_aux_trans_gpu(j,i-m,k,6)
-              ppi   = tti*rhoi*rgas0
+              case(1) ! Etot JP
 !
-              rhoip = w_aux_trans_gpu(j,i-m+l,k,1)
-              uuip  = w_aux_trans_gpu(j,i-m+l,k,2)
-              vvip  = w_aux_trans_gpu(j,i-m+l,k,3)
-              wwip  = w_aux_trans_gpu(j,i-m+l,k,4)
-              entip = w_aux_trans_gpu(j,i-m+l,k,5)
-              ttip  = w_aux_trans_gpu(j,i-m+l,k,6)
-              ppip  = ttip*rhoip*rgas0
+                uv_part = (uui+uuip) * rhom
+                uvs1 = uvs1 + uv_part * (2._rkind)
+                uvs2 = uvs2 + uv_part * (uui+uuip)
+                uvs3 = uvs3 + uv_part * (vvi+vvip)
+                uvs4 = uvs4 + uv_part * (wwi+wwip)
+                uvs5 = uvs5 + uv_part * (enti+entip)
+                uvs6 = uvs6 + (2._rkind)*(ppi+ppip)
 !
-              rhom  = rhoi+rhoip
-              uv_part = (uui+uuip) * rhom
-              uvs1 = uvs1 + uv_part * (2._rkind)
-              uvs2 = uvs2 + uv_part * (uui+uuip)
-              uvs3 = uvs3 + uv_part * (vvi+vvip)
-              uvs4 = uvs4 + uv_part * (wwi+wwip)
-              uvs5 = uvs5 + uv_part * (enti+entip)
-              uvs6 = uvs6 + (2._rkind)*(ppi+ppip)
+              case(2) ! Etot PEP - Chandrashekar, Singh
+!
+                uv_part = (uui+uuip) * rhom
+                uvs1 = uvs1 + uv_part * (2._rkind)
+                uvs2 = uvs2 + uv_part * (uui+uuip)
+                uvs3 = uvs3 + uv_part * (vvi+vvip)
+                uvs4 = uvs4 + uv_part * (wwi+wwip)
+                uvs5_i = uvs5_i + 2._rkind * (uui+uuip) * (rhoi*eei+rhoip*eeip)
+                uvs5_k = uvs5_k + uv_part  * (qqi+qqip)
+                uvs5_p = uvs5_p + 2._rkind * (uui+uuip) * (ppi+ppip)
+                uvs6 = uvs6 + (2._rkind)*(ppi+ppip)
+!
+              case(3) ! Eint PEP - Shima et al.
+!
+                uv_part = (uui+uuip) * rhom
+                uvs1 = uvs1 + uv_part * (2._rkind)
+                uvs2 = uvs2 + uv_part * (uui+uuip)
+                uvs3 = uvs3 + uv_part * (vvi+vvip)
+                uvs4 = uvs4 + uv_part * (wwi+wwip)
+                uvs5_i = uvs5_i + 2._rkind * (uui+uuip) * (rhoi*eei+rhoip*eeip)
+                uvs5_k = uvs5_k + uv_part  * (uui*uuip+vvi*vvip+wwi*wwip)
+                uvs5_p = uvs5_p + 4._rkind * (uui*ppip+uuip*ppi)
+                uvs6 = uvs6 + (2._rkind)*(ppi+ppip)
+!
+              case(4) ! Eint KEEP(N) - Kuya et al.
+!
+                drho   = 2._rkind*(rhoip-rhoi)/rhom
+                dee    = 2._rkind*(eeip - eei)/eem
+                sumnumrho = 1._rkind
+                sumdenrho = 1._rkind
+                sumnumee  = 1._rkind
+                sumdenee  = 1._rkind
+                do n = 1, nkeep
+                  n2 = 2*n
+                  sumdenrho = sumdenrho + (0.5_rkind*drho)**n2 / (1._rkind+n2)
+                  sumdenee  = sumdenee  + (0.5_rkind*dee )**n2
+                  sumnumee  = sumnumee  + (0.5_rkind*dee )**n2 / (1._rkind+n2)
+                enddo
+                drhof = sumnumrho/sumdenrho
+                deef  = sumnumee /sumdenee
+!
+                uv_part = (uui+uuip) * rhom * drhof
+                uvs1 = uvs1 + uv_part * (2._rkind)
+                uvs2 = uvs2 + uv_part * (uui+uuip)
+                uvs3 = uvs3 + uv_part * (vvi+vvip)
+                uvs4 = uvs4 + uv_part * (wwi+wwip)
+                uvs5_i = uvs5_i + uv_part * eem * deef
+                uvs5_k = uvs5_k + uv_part * (uui*uuip+vvi*vvip+wwi*wwip)
+                uvs5_p = uvs5_p + 4._rkind*(uui*ppip+uuip*ppi)
+                uvs6 = uvs6 + (2._rkind)*(ppi+ppip)
+!
+              endselect
             enddo
             ft1 = ft1 + coeff_deriv1_gpu(l,lmax)*uvs1
             ft2 = ft2 + coeff_deriv1_gpu(l,lmax)*uvs2
             ft3 = ft3 + coeff_deriv1_gpu(l,lmax)*uvs3
             ft4 = ft4 + coeff_deriv1_gpu(l,lmax)*uvs4
-            ft5 = ft5 + coeff_deriv1_gpu(l,lmax)*uvs5
+            ft5 = ft5 + coeff_deriv1_gpu(l,lmax)*(uvs5+uvs5_i+uvs5_k+uvs5_p)
             ft6 = ft6 + coeff_deriv1_gpu(l,lmax)*uvs6
           enddo
-        endif
 !
         fh1 = 0.25_rkind*ft1
         fh2 = 0.25_rkind*ft2
@@ -615,7 +625,7 @@ contains
     force_zero_flux_min, force_zero_flux_max, &
     weno_scheme, weno_version, sensor_threshold, weno_size, w_gpu, gplus_z_gpu, gminus_z_gpu, cp_coeff_gpu, indx_cp_l, indx_cp&
     &_r, &
-    ep_ord_change_gpu, calorically_perfect, tol_iter_nr,rho0,u0,t0)
+    ep_ord_change_gpu, calorically_perfect, tol_iter_nr,rho0,u0,t0,energy_form)
     implicit none
 !   Passed arguments
     integer, value :: nv, nx, ny, nz, ng, nv_aux
@@ -631,11 +641,12 @@ contains
     integer, value :: force_zero_flux_min, force_zero_flux_max
     real(rkind), value :: sensor_threshold, rgas0, tol_iter_nr, rho0, u0, t0
     integer, value :: weno_scheme, weno_size, weno_version
+    integer, value :: energy_form
 !   Local variables
     integer :: i, j, k, m, l
     real(rkind) :: fh1, fh2, fh3, fh4, fh5
     real(rkind) :: rhom, uui, vvi, wwi, ppi, enti, rhoi, tti
-    real(rkind) :: uuip, vvip, wwip, ppip, entip, rhoip, ttip
+    real(rkind) :: uuip, vvip, wwip, ppip, entip, rhoip, ttip, qqi, qqip
     real(rkind) :: ft1, ft2, ft3, ft4, ft5, ft6
     real(rkind) :: uvs1, uvs2, uvs3, uvs4, uvs6, uv_part
     real(rkind) :: uvs5
@@ -673,7 +684,7 @@ contains
         ft5  = 0._rkind
         ft6  = 0._rkind
         lmax = max(lmax_base+ep_ord_change_gpu(i,j,k,3),1)
-        if (nkeep>=0) then
+
           do l=1,lmax
             uvs1 = 0._rkind
             uvs2 = 0._rkind
@@ -692,7 +703,8 @@ contains
               enti  = w_aux_gpu(i,j,k-m,5)
               tti   = w_aux_gpu(i,j,k-m,6)
               ppi   = tti*rhoi*rgas0
-              eei   = enti-ppi/rhoi-0.5_rkind*(uui*uui+vvi*vvi+wwi*wwi)
+              qqi   = 0.5_rkind*(uui*uui+vvi*vvi+wwi*wwi)
+              eei   = enti-ppi/rhoi-qqi
 !
               rhoip = w_aux_gpu(i,j,k-m+l,1)
               uuip  = w_aux_gpu(i,j,k-m+l,2)
@@ -701,91 +713,101 @@ contains
               entip = w_aux_gpu(i,j,k-m+l,5)
               ttip  = w_aux_gpu(i,j,k-m+l,6)
               ppip  = ttip*rhoip*rgas0
-              eeip  = entip-ppip/rhoip-0.5_rkind*(uuip*uuip+vvip*vvip+wwip*wwip)
+              qqip  = 0.5_rkind*(uuip*uuip+vvip*vvip+wwip*wwip)
+              eeip  = entip-ppip/rhoip-qqip
 !
               rhom  = rhoi + rhoip
               eem   = eei  + eeip
 !
-              drho   = 2._rkind*(rhoip-rhoi)/rhom
-              dee    = 2._rkind*(eeip - eei)/eem
-              sumnumrho = 1._rkind
-              sumdenrho = 1._rkind
-              sumnumee  = 1._rkind
-              sumdenee  = 1._rkind
-              do n = 1, nkeep
-                n2 = 2*n
-                sumdenrho = sumdenrho + (0.5_rkind*drho)**n2 / (1._rkind+n2)
-                sumdenee  = sumdenee  + (0.5_rkind*dee )**n2
-                sumnumee  = sumnumee  + (0.5_rkind*dee )**n2 / (1._rkind+n2)
-              enddo
-              drhof = sumnumrho/sumdenrho
-              deef  = sumnumee /sumdenee
+              select case(energy_form)
+              case(0) ! Etot KGP
 !
-              uv_part = (wwi+wwip) * rhom * drhof
-              uvs1 = uvs1 + uv_part * (2._rkind)
-              uvs2 = uvs2 + uv_part * (uui+uuip)
-              uvs3 = uvs3 + uv_part * (vvi+vvip)
-              uvs4 = uvs4 + uv_part * (wwi+wwip)
-              uvs5_i = uvs5_i + uv_part * eem * deef
-              uvs5_k = uvs5_k + uv_part * (uui*uuip+vvi*vvip+wwi*wwip)
-              uvs5_p = uvs5_p + 4._rkind*(wwi*ppip+wwip*ppi)
-              uvs6 = uvs6 + (2._rkind)*(ppi+ppip)
-            enddo
-            ft1  = ft1  + coeff_deriv1_gpu(l,lmax)*uvs1
-            ft2  = ft2  + coeff_deriv1_gpu(l,lmax)*uvs2
-            ft3  = ft3  + coeff_deriv1_gpu(l,lmax)*uvs3
-            ft4  = ft4  + coeff_deriv1_gpu(l,lmax)*uvs4
-            ft5  = ft5  + coeff_deriv1_gpu(l,lmax)*(uvs5_i+uvs5_k+uvs5_p)
-            ft6  = ft6  + coeff_deriv1_gpu(l,lmax)*uvs6
-          enddo
-        else
-          do l=1,lmax
-            uvs1 = 0._rkind
-            uvs2 = 0._rkind
-            uvs3 = 0._rkind
-            uvs4 = 0._rkind
-            uvs5 = 0._rkind
-            uvs6 = 0._rkind
-            do m=0,l-1
+                uv_part = (wwi+wwip) * rhom
+                uvs1 = uvs1 + uv_part * (2._rkind)
+                uvs2 = uvs2 + uv_part * (uui+uuip)
+                uvs3 = uvs3 + uv_part * (vvi+vvip)
+                uvs4 = uvs4 + uv_part * (wwi+wwip)
+                uvs5_i = uvs5_i + uv_part * (entip-ppip/rhoip+enti-ppi/rhoi) 
+                uvs5_p = uvs5_p + 4._rkind*(wwi*ppi+wwip*ppip)
+                uvs6 = uvs6 + (2._rkind)*(ppi+ppip)
 !
-              rhoi  = w_aux_gpu(i,j,k-m,1)
-              uui   = w_aux_gpu(i,j,k-m,2)
-              vvi   = w_aux_gpu(i,j,k-m,3)
-              wwi   = w_aux_gpu(i,j,k-m,4)
-              enti  = w_aux_gpu(i,j,k-m,5)
-              tti   = w_aux_gpu(i,j,k-m,6)
-              ppi   = tti*rhoi*rgas0
+              case(1) ! Etot JP
 !
-              rhoip = w_aux_gpu(i,j,k-m+l,1)
-              uuip  = w_aux_gpu(i,j,k-m+l,2)
-              vvip  = w_aux_gpu(i,j,k-m+l,3)
-              wwip  = w_aux_gpu(i,j,k-m+l,4)
-              entip = w_aux_gpu(i,j,k-m+l,5)
-              ttip  = w_aux_gpu(i,j,k-m+l,6)
-              ppip  = ttip*rhoip*rgas0
+                uv_part = (wwi+wwip) * rhom
+                uvs1 = uvs1 + uv_part * (2._rkind)
+                uvs2 = uvs2 + uv_part * (uui+uuip)
+                uvs3 = uvs3 + uv_part * (vvi+vvip)
+                uvs4 = uvs4 + uv_part * (wwi+wwip)
+                uvs5 = uvs5 + uv_part * (enti+entip)
+                uvs6 = uvs6 + (2._rkind)*(ppi+ppip)
 !
-              rhom  = rhoi+rhoip
-              uv_part = (wwi+wwip) * rhom
-              uvs1 = uvs1 + uv_part * (2._rkind)
-              uvs2 = uvs2 + uv_part * (uui+uuip)
-              uvs3 = uvs3 + uv_part * (vvi+vvip)
-              uvs4 = uvs4 + uv_part * (wwi+wwip)
-              uvs5 = uvs5 + uv_part * (enti+entip)
-              uvs6 = uvs6 + (2._rkind)*(ppi+ppip)
+              case(2) ! Etot PEP - Chandrashekar, Singh
+!
+                uv_part = (wwi+wwip) * rhom
+                uvs1 = uvs1 + uv_part * (2._rkind)
+                uvs2 = uvs2 + uv_part * (uui+uuip)
+                uvs3 = uvs3 + uv_part * (vvi+vvip)
+                uvs4 = uvs4 + uv_part * (wwi+wwip)
+                uvs5_i = uvs5_i + 2._rkind * (wwi+wwip) * (rhoi*eei+rhoip*eeip)
+                uvs5_k = uvs5_k + uv_part  * (qqi+qqip)
+                uvs5_p = uvs5_p + 2._rkind * (wwi+wwip) * (ppi+ppip)
+                uvs6 = uvs6 + (2._rkind)*(ppi+ppip)
+!
+              case(3) ! Eint PEP - Shima et al.
+!
+                uv_part = (wwi+wwip) * rhom
+                uvs1 = uvs1 + uv_part * (2._rkind)
+                uvs2 = uvs2 + uv_part * (uui+uuip)
+                uvs3 = uvs3 + uv_part * (vvi+vvip)
+                uvs4 = uvs4 + uv_part * (wwi+wwip)
+                uvs5_i = uvs5_i + 2._rkind * (wwi+wwip) * (rhoi*eei+rhoip*eeip)
+                uvs5_k = uvs5_k + uv_part  * (uui*uuip+vvi*vvip+wwi*wwip)
+                uvs5_p = uvs5_p + 4._rkind * (wwi*ppip+wwip*ppi)
+                uvs6 = uvs6 + (2._rkind)*(ppi+ppip)
+!
+              case(4) ! Eint KEEP(N) - Kuya et al.
+!
+                drho   = 2._rkind*(rhoip-rhoi)/rhom
+                dee    = 2._rkind*(eeip - eei)/eem
+                sumnumrho = 1._rkind
+                sumdenrho = 1._rkind
+                sumnumee  = 1._rkind
+                sumdenee  = 1._rkind
+                do n = 1, nkeep
+                  n2 = 2*n
+                  sumdenrho = sumdenrho + (0.5_rkind*drho)**n2 / (1._rkind+n2)
+                  sumdenee  = sumdenee  + (0.5_rkind*dee )**n2
+                  sumnumee  = sumnumee  + (0.5_rkind*dee )**n2 / (1._rkind+n2)
+                enddo
+                drhof = sumnumrho/sumdenrho
+                deef  = sumnumee /sumdenee
+!
+                uv_part = (wwi+wwip) * rhom * drhof
+                uvs1 = uvs1 + uv_part * (2._rkind)
+                uvs2 = uvs2 + uv_part * (uui+uuip)
+                uvs3 = uvs3 + uv_part * (vvi+vvip)
+                uvs4 = uvs4 + uv_part * (wwi+wwip)
+                uvs5_i = uvs5_i + uv_part * eem * deef
+                uvs5_k = uvs5_k + uv_part * (uui*uuip+vvi*vvip+wwi*wwip)
+                uvs5_p = uvs5_p + 4._rkind*(wwi*ppip+wwip*ppi)
+                uvs6 = uvs6 + (2._rkind)*(ppi+ppip)
+!
+              endselect
             enddo
             ft1 = ft1 + coeff_deriv1_gpu(l,lmax)*uvs1
             ft2 = ft2 + coeff_deriv1_gpu(l,lmax)*uvs2
             ft3 = ft3 + coeff_deriv1_gpu(l,lmax)*uvs3
             ft4 = ft4 + coeff_deriv1_gpu(l,lmax)*uvs4
-            ft5 = ft5 + coeff_deriv1_gpu(l,lmax)*uvs5
+            ft5 = ft5 + coeff_deriv1_gpu(l,lmax)*(uvs5+uvs5_i+uvs5_k+uvs5_p)
             ft6 = ft6 + coeff_deriv1_gpu(l,lmax)*uvs6
           enddo
-        endif
+!
         fh1 = 0.25_rkind*ft1
         fh2 = 0.25_rkind*ft2
         fh3 = 0.25_rkind*ft3
         fh4 = 0.25_rkind*ft4
         fh5 = 0.25_rkind*ft5
+!
         if ((k==0 .and. force_zero_flux_min == 1).or.(k==nz .and. force_zero_flux_max == 1)) then
           fh1 = 0._rkind
           fh2 = 0._rkind
@@ -1145,7 +1167,7 @@ contains
     force_zero_flux_min, force_zero_flux_max, &
     weno_scheme, weno_version, sensor_threshold, weno_size, w_gpu, gplus_y_gpu, gminus_y_gpu, cp_coeff_gpu, indx_cp_l, indx_cp&
     &_r, &
-    ep_ord_change_gpu, calorically_perfect, tol_iter_nr,rho0,u0,t0)
+    ep_ord_change_gpu, calorically_perfect, tol_iter_nr,rho0,u0,t0,energy_form)
     implicit none
 !   Passed arguments
     integer, value :: nv, nx, ny, nz, ng, nv_aux
@@ -1161,11 +1183,12 @@ contains
     integer, value :: force_zero_flux_min, force_zero_flux_max
     real(rkind), value :: sensor_threshold, rgas0, tol_iter_nr,rho0,u0,t0
     integer, value :: weno_scheme, weno_size, weno_version
+    integer, value :: energy_form
 !   Local variables
     integer :: i, j, k, m, l
     real(rkind) :: fh1, fh2, fh3, fh4, fh5
     real(rkind) :: rhom, uui, vvi, wwi, ppi, enti, rhoi, tti
-    real(rkind) :: uuip, vvip, wwip, ppip, entip, rhoip, ttip
+    real(rkind) :: uuip, vvip, wwip, ppip, entip, rhoip, ttip, qqi, qqip
     real(rkind) :: ft1, ft2, ft3, ft4, ft5, ft6
     real(rkind) :: uvs1, uvs2, uvs3, uvs4, uvs6, uv_part
     real(rkind) :: uvs5
@@ -1223,7 +1246,8 @@ contains
               enti  = w_aux_gpu(i,j-m,k,5)
               tti   = w_aux_gpu(i,j-m,k,6)
               ppi   = tti*rhoi*rgas0
-              eei   = enti-ppi/rhoi-0.5_rkind*(uui*uui+vvi*vvi+wwi*wwi)
+              qqi   = 0.5_rkind*(uui*uui+vvi*vvi+wwi*wwi)
+              eei   = enti-ppi/rhoi-qqi
 !
               rhoip = w_aux_gpu(i,j-m+l,k,1)
               uuip  = w_aux_gpu(i,j-m+l,k,2)
@@ -1232,91 +1256,101 @@ contains
               entip = w_aux_gpu(i,j-m+l,k,5)
               ttip  = w_aux_gpu(i,j-m+l,k,6)
               ppip  = ttip*rhoip*rgas0
-              eeip  = entip-ppip/rhoip-0.5_rkind*(uuip*uuip+vvip*vvip+wwip*wwip)
+              qqip  = 0.5_rkind*(uuip*uuip+vvip*vvip+wwip*wwip)
+              eeip  = entip-ppip/rhoip-qqip
 !
               rhom  = rhoi + rhoip
               eem   = eei  + eeip
 !
-              drho   = 2._rkind*(rhoip-rhoi)/rhom
-              dee    = 2._rkind*(eeip - eei)/eem
-              sumnumrho = 1._rkind
-              sumdenrho = 1._rkind
-              sumnumee  = 1._rkind
-              sumdenee  = 1._rkind
-              do n = 1, nkeep
-                n2 = 2*n
-                sumdenrho = sumdenrho + (0.5_rkind*drho)**n2 / (1._rkind+n2)
-                sumdenee  = sumdenee  + (0.5_rkind*dee )**n2
-                sumnumee  = sumnumee  + (0.5_rkind*dee )**n2 / (1._rkind+n2)
-              enddo
-              drhof = sumnumrho/sumdenrho
-              deef  = sumnumee /sumdenee
+              select case(energy_form)
+              case(0) ! Etot KGP
 !
-              uv_part = (vvi+vvip) * rhom * drhof
-              uvs1 = uvs1 + uv_part * (2._rkind)
-              uvs2 = uvs2 + uv_part * (uui+uuip)
-              uvs3 = uvs3 + uv_part * (vvi+vvip)
-              uvs4 = uvs4 + uv_part * (wwi+wwip)
-              uvs5_i = uvs5_i + uv_part * eem * deef
-              uvs5_k = uvs5_k + uv_part * (uui*uuip+vvi*vvip+wwi*wwip)
-              uvs5_p = uvs5_p + 4._rkind*(vvi*ppip+vvip*ppi)
-              uvs6 = uvs6 + (2._rkind)*(ppi+ppip)
-            enddo
-            ft1  = ft1  + coeff_deriv1_gpu(l,lmax)*uvs1
-            ft2  = ft2  + coeff_deriv1_gpu(l,lmax)*uvs2
-            ft3  = ft3  + coeff_deriv1_gpu(l,lmax)*uvs3
-            ft4  = ft4  + coeff_deriv1_gpu(l,lmax)*uvs4
-            ft5  = ft5  + coeff_deriv1_gpu(l,lmax)*(uvs5_i+uvs5_k+uvs5_p)
-            ft6  = ft6  + coeff_deriv1_gpu(l,lmax)*uvs6
-          enddo
-        else
-          do l=1,lmax
-            uvs1 = 0._rkind
-            uvs2 = 0._rkind
-            uvs3 = 0._rkind
-            uvs4 = 0._rkind
-            uvs5 = 0._rkind
-            uvs6 = 0._rkind
-            do m=0,l-1
+                uv_part = (vvi+vvip) * rhom
+                uvs1 = uvs1 + uv_part * (2._rkind)
+                uvs2 = uvs2 + uv_part * (uui+uuip)
+                uvs3 = uvs3 + uv_part * (vvi+vvip)
+                uvs4 = uvs4 + uv_part * (wwi+wwip)
+                uvs5_i = uvs5_i + uv_part * (entip-ppip/rhoip+enti-ppi/rhoi) 
+                uvs5_p = uvs5_p + 4._rkind*(vvi*ppi+vvip*ppip)
+                uvs6 = uvs6 + (2._rkind)*(ppi+ppip)
 !
-              rhoi  = w_aux_gpu(i,j-m,k,1)
-              uui   = w_aux_gpu(i,j-m,k,2)
-              vvi   = w_aux_gpu(i,j-m,k,3)
-              wwi   = w_aux_gpu(i,j-m,k,4)
-              enti  = w_aux_gpu(i,j-m,k,5)
-              tti   = w_aux_gpu(i,j-m,k,6)
-              ppi   = tti*rhoi*rgas0
+              case(1) ! Etot JP
 !
-              rhoip = w_aux_gpu(i,j-m+l,k,1)
-              uuip  = w_aux_gpu(i,j-m+l,k,2)
-              vvip  = w_aux_gpu(i,j-m+l,k,3)
-              wwip  = w_aux_gpu(i,j-m+l,k,4)
-              entip = w_aux_gpu(i,j-m+l,k,5)
-              ttip  = w_aux_gpu(i,j-m+l,k,6)
-              ppip  = ttip*rhoip*rgas0
+                uv_part = (vvi+vvip) * rhom
+                uvs1 = uvs1 + uv_part * (2._rkind)
+                uvs2 = uvs2 + uv_part * (uui+uuip)
+                uvs3 = uvs3 + uv_part * (vvi+vvip)
+                uvs4 = uvs4 + uv_part * (wwi+wwip)
+                uvs5 = uvs5 + uv_part * (enti+entip)
+                uvs6 = uvs6 + (2._rkind)*(ppi+ppip)
 !
-              rhom  = rhoi + rhoip
-              uv_part = (vvi+vvip) * rhom
-              uvs1 = uvs1 + uv_part * (2._rkind)
-              uvs2 = uvs2 + uv_part * (uui+uuip)
-              uvs3 = uvs3 + uv_part * (vvi+vvip)
-              uvs4 = uvs4 + uv_part * (wwi+wwip)
-              uvs5 = uvs5 + uv_part * (enti+entip)
-              uvs6 = uvs6 + (2._rkind)*(ppi+ppip)
-            enddo
+              case(2) ! Etot PEP - Chandrashekar, Singh
+!
+                uv_part = (vvi+vvip) * rhom
+                uvs1 = uvs1 + uv_part * (2._rkind)
+                uvs2 = uvs2 + uv_part * (uui+uuip)
+                uvs3 = uvs3 + uv_part * (vvi+vvip)
+                uvs4 = uvs4 + uv_part * (wwi+wwip)
+                uvs5_i = uvs5_i + 2._rkind * (vvi+vvip) * (rhoi*eei+rhoip*eeip)
+                uvs5_k = uvs5_k + uv_part  * (qqi+qqip)
+                uvs5_p = uvs5_p + 2._rkind * (vvi+vvip) * (ppi+ppip)
+                uvs6 = uvs6 + (2._rkind)*(ppi+ppip)
+!
+              case(3) ! Eint PEP - Shima et al.
+!
+                uv_part = (vvi+vvip) * rhom
+                uvs1 = uvs1 + uv_part * (2._rkind)
+                uvs2 = uvs2 + uv_part * (uui+uuip)
+                uvs3 = uvs3 + uv_part * (vvi+vvip)
+                uvs4 = uvs4 + uv_part * (wwi+wwip)
+                uvs5_i = uvs5_i + 2._rkind * (vvi+vvip) * (rhoi*eei+rhoip*eeip)
+                uvs5_k = uvs5_k + uv_part  * (uui*uuip+vvi*vvip+wwi*wwip)
+                uvs5_p = uvs5_p + 4._rkind * (vvi*ppip+vvip*ppi)
+                uvs6 = uvs6 + (2._rkind)*(ppi+ppip)
+!
+              case(4) ! Eint KEEP(N) - Kuya et al.
+!
+                drho   = 2._rkind*(rhoip-rhoi)/rhom
+                dee    = 2._rkind*(eeip - eei)/eem
+                sumnumrho = 1._rkind
+                sumdenrho = 1._rkind
+                sumnumee  = 1._rkind
+                sumdenee  = 1._rkind
+                do n = 1, nkeep
+                  n2 = 2*n
+                  sumdenrho = sumdenrho + (0.5_rkind*drho)**n2 / (1._rkind+n2)
+                  sumdenee  = sumdenee  + (0.5_rkind*dee )**n2
+                  sumnumee  = sumnumee  + (0.5_rkind*dee )**n2 / (1._rkind+n2)
+                enddo
+                drhof = sumnumrho/sumdenrho
+                deef  = sumnumee /sumdenee
+!
+                uv_part = (vvi+vvip) * rhom * drhof
+                uvs1 = uvs1 + uv_part * (2._rkind)
+                uvs2 = uvs2 + uv_part * (uui+uuip)
+                uvs3 = uvs3 + uv_part * (vvi+vvip)
+                uvs4 = uvs4 + uv_part * (wwi+wwip)
+                uvs5_i = uvs5_i + uv_part * eem * deef
+                uvs5_k = uvs5_k + uv_part * (uui*uuip+vvi*vvip+wwi*wwip)
+                uvs5_p = uvs5_p + 4._rkind*(vvi*ppip+vvip*ppi)
+                uvs6 = uvs6 + (2._rkind)*(ppi+ppip)
+!
+              endselect
+            enddo  
             ft1 = ft1 + coeff_deriv1_gpu(l,lmax)*uvs1
             ft2 = ft2 + coeff_deriv1_gpu(l,lmax)*uvs2
             ft3 = ft3 + coeff_deriv1_gpu(l,lmax)*uvs3
             ft4 = ft4 + coeff_deriv1_gpu(l,lmax)*uvs4
-            ft5 = ft5 + coeff_deriv1_gpu(l,lmax)*uvs5
+            ft5 = ft5 + coeff_deriv1_gpu(l,lmax)*(uvs5+uvs5_i+uvs5_k+uvs5_p)
             ft6 = ft6 + coeff_deriv1_gpu(l,lmax)*uvs6
           enddo
-        endif
+!
         fh1 = 0.25_rkind*ft1
         fh2 = 0.25_rkind*ft2
         fh3 = 0.25_rkind*ft3
         fh4 = 0.25_rkind*ft4
         fh5 = 0.25_rkind*ft5
+!
         if ((j==0 .and. force_zero_flux_min == 1).or.(j==ny .and. force_zero_flux_max == 1)) then
           fh1 = 0._rkind
           fh2 = 0._rkind
